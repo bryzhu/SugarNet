@@ -495,7 +495,8 @@ def adjust_learning_rate(optimizer, epoch, name):
       'FGN': 0.0001,
       'TimeMixer': 0.0001,
       'FiLM': 0.0001,
-      'PatchTST': 0.0001
+      'PatchTST': 0.0001,
+      'FEDformer': 0.0001,
     }
     lr_adjust = {epoch: learning_dict[name] * (0.5 ** ((epoch - 1) // 1))}
 

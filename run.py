@@ -137,7 +137,7 @@ if __name__ == '__main__':
     model_path = '/content/drive/MyDrive/research/diabetes/FREQ_DOMAIN/models'
 
     #'SugarNet', 'PatchTST', 'FreTS', 'DLinear', 'iTransformer', 'FGN', 'FiLM', 'TimeMixer'
-    models = ['SugarNet']
+    models = ['FEDformer']
 
     for name in models:
       print(f"run {name}")
