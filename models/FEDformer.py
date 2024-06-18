@@ -21,7 +21,6 @@ class Model(nn.Module):
         modes: int, modes to be selected.
         """
         super(Model, self).__init__()
-        self.task_name = configs.task_name
         self.seq_len = configs.seq_len
         self.label_len = configs.label_len
         self.pred_len = configs.pred_len
@@ -105,16 +104,8 @@ class Model(nn.Module):
             projection=nn.Linear(configs.d_model, configs.c_out, bias=True)
         )
 
-        if self.task_name == 'imputation':
-            self.projection = nn.Linear(configs.d_model, configs.c_out, bias=True)
-        if self.task_name == 'anomaly_detection':
-            self.projection = nn.Linear(configs.d_model, configs.c_out, bias=True)
-        if self.task_name == 'classification':
-            self.act = F.gelu
-            self.dropout = nn.Dropout(configs.dropout)
-            self.projection = nn.Linear(configs.d_model * configs.seq_len, configs.num_class)
 
-    def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+    def forward(self, x_enc, x_dec, x_mark_enc=None, x_mark_dec=None):
         # decomp init
         mean = torch.mean(x_enc, dim=1).unsqueeze(1).repeat(1, self.pred_len, 1)
         seasonal_init, trend_init = self.decomp(x_enc)  # x - moving_avg, moving_avg
@@ -129,48 +120,4 @@ class Model(nn.Module):
         seasonal_part, trend_part = self.decoder(dec_out, enc_out, x_mask=None, cross_mask=None, trend=trend_init)
         # final
         dec_out = trend_part + seasonal_part
-        return dec_out
-
-    def imputation(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask):
-        # enc
-        enc_out = self.enc_embedding(x_enc, x_mark_enc)
-        enc_out, attns = self.encoder(enc_out, attn_mask=None)
-        # final
-        dec_out = self.projection(enc_out)
-        return dec_out
-
-    def anomaly_detection(self, x_enc):
-        # enc
-        enc_out = self.enc_embedding(x_enc, None)
-        enc_out, attns = self.encoder(enc_out, attn_mask=None)
-        # final
-        dec_out = self.projection(enc_out)
-        return dec_out
-
-    def classification(self, x_enc, x_mark_enc):
-        # enc
-        enc_out = self.enc_embedding(x_enc, None)
-        enc_out, attns = self.encoder(enc_out, attn_mask=None)
-
-        # Output
-        output = self.act(enc_out)
-        output = self.dropout(output)
-        output = output * x_mark_enc.unsqueeze(-1)
-        output = output.reshape(output.shape[0], -1)
-        output = self.projection(output)
-        return output
-
-    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
-        if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
-            return dec_out[:, -self.pred_len:, :]  # [B, L, D]
-        if self.task_name == 'imputation':
-            dec_out = self.imputation(x_enc, x_mark_enc, x_dec, x_mark_dec, mask)
-            return dec_out  # [B, L, D]
-        if self.task_name == 'anomaly_detection':
-            dec_out = self.anomaly_detection(x_enc)
-            return dec_out  # [B, L, D]
-        if self.task_name == 'classification':
-            dec_out = self.classification(x_enc, x_mark_enc)
-            return dec_out  # [B, N]
-        return None
+        return dec_out[:, -self.pred_len:, :]

@@ -57,7 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--delta_forecast', type=bool, default=True, help='generate delta forecast')
 
     # data loader
-    parser.add_argument('--data', type=str, default='T1D', help='dataset type')
+    parser.add_argument('--data', type=str, default='T2D', help='dataset type')
     parser.add_argument('--features', type=str, default='MS',
                         help='forecasting task, options:[M, S, MS]; M:multivariate predict multivariate, S:univariate predict univariate, MS:multivariate predict univariate')
    # parser.add_argument('--target', type=str, default='OT', help='target feature in S or MS task')
