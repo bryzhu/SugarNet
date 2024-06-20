@@ -6,7 +6,7 @@ from torch import optim
 from utils.constants import VERBOSE, LEARNING_RATE, BATCH, FUTURE_STEPS, FREQ
 from data_provider.data_factory import data_provider
 from utils.tools import EarlyStopping, lag_target, adjust_learning_rate
-from models import DLinear, iTransformer, FreTS, SugarNet, FGN, TimeMixer, FiLM, PatchTST, FEDformer
+from models import DLinear, iTransformer, FreTS, SugarNet, FGN, TimeMixer, FiLM, PatchTST, FEDformer, back, sugar1
 from exp.exp_basic import Exp_Basic
 from utils.metrics import metric
 import os
@@ -35,7 +35,10 @@ class Exp_Main(Exp_Basic):
             'FiLM': FiLM,
             'PatchTST': PatchTST,
             'FEDformer': FEDformer,
+            'back': back,
+            'sugar1': sugar1,
         }
+        
         model = model_dict[self.name].Model(self.args).float()
         return model
 

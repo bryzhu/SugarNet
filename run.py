@@ -11,12 +11,28 @@ def pretraining(args, epochs=1, name="SugarNet"):
     exp = Exp_Main(args, name)
     print(f"{FEATURES}")
     model, loss = exp.train(data=pretrain_map, epochs = epochs, features=FEATURES)
-    best_model_path = model_path + '/' + f'{name}_{args.data}.checkpoint.pth'
+    if args.dim_extension:
+      ext = "ext"
+    else:
+      ext = "noexit"
+    if args.delta_forecast:
+      delta = "delta"
+    else:
+      delta = "nodelta"
+    best_model_path = model_path + '/' + f'{name}_{args.data}.{ext}.{delta}.checkpoint.pth'
     print(f"save {best_model_path}")
     torch.save(model.state_dict(), best_model_path)
 
-def transfer_learn_model(all_train_df, all_test_df, args, name="SugarPal"):
-  best_model_path = model_path + '/' + f'{name}_{args.data}.checkpoint.pth'
+def transfer_learn_model(all_train_df, all_test_df, args, name="SugarNet"):
+  if args.dim_extension:
+      ext = "ext"
+  else:
+      ext = "noexit"
+  if args.delta_forecast:
+      delta = "delta"
+  else:
+      delta = "nodelta"
+  best_model_path = model_path + '/' + f'{name}_{args.data}.{ext}.{delta}.checkpoint.pth'
   rmape = []
   rrmse = []
 
@@ -47,14 +63,15 @@ if __name__ == '__main__':
     torch.manual_seed(fix_seed)
     np.random.seed(fix_seed)
 
-    parser = argparse.ArgumentParser(description='SugarPal')
+    parser = argparse.ArgumentParser(description='SugarNet')
 
     # basic config
     parser.add_argument('--pretraining_epochs', type=int, default=50,
                         help='Number of epochs for pretraining')
     parser.add_argument('--learn_epochs', type=int, default=50,
                         help='Number of epochs for transfer learning')
-    parser.add_argument('--delta_forecast', type=bool, default=True, help='generate delta forecast')
+    parser.add_argument('--delta_forecast', type=bool, default=False, help='generate delta forecast')
+    parser.add_argument('--dim_extension', type=bool, default=True, help='enable dimension extension')
 
     # data loader
     parser.add_argument('--data', type=str, default='T2D', help='dataset type')
@@ -137,12 +154,12 @@ if __name__ == '__main__':
     model_path = '/content/drive/MyDrive/research/diabetes/FREQ_DOMAIN/models'
 
     #'SugarNet', 'PatchTST', 'FreTS', 'DLinear', 'iTransformer', 'FGN', 'FiLM', 'TimeMixer'
-    models = ['FEDformer']
+    models = ['SugarNet']
 
     for name in models:
-      print(f"run {name}")
+      print(f"run {name} extension = {args.dim_extension} delta = {args.delta_forecast}")
       if name != 'SugarNet':
         args.learning_rate = 0.0001
-      pretraining(args, epochs=args.pretraining_epochs, name=name)
+     # pretraining(args, epochs=args.pretraining_epochs, name=name)
       mape, rmse = transfer_learn_model(train_map, test_map, args, name=name)
       print(f"run {name} result mape {mape} \n rmse {rmse}")

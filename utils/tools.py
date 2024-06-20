@@ -497,6 +497,8 @@ def adjust_learning_rate(optimizer, epoch, name):
       'FiLM': 0.0001,
       'PatchTST': 0.0001,
       'FEDformer': 0.0001,
+      'back': 0.001,
+      'sugar1': 0.001,
     }
     lr_adjust = {epoch: learning_dict[name] * (0.5 ** ((epoch - 1) // 1))}
 
@@ -506,7 +508,7 @@ def adjust_learning_rate(optimizer, epoch, name):
             param_group['lr'] = lr
 
 class EarlyStopping:
-    def __init__(self, patience=7, verbose=False, delta=0.0001):
+    def __init__(self, patience=3, verbose=False, delta=0.0001):
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
