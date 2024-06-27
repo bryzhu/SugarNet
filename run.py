@@ -3,13 +3,12 @@ import os
 import torch
 from exp.exp_main import Exp_Main
 from utils.constants import FEATURES
-from utils.tools import loadPreTrainingData, loadIndividualLearningData
+from utils.tools import loadPreTrainingData, loadIndividualLearningData, visual, calcClark, visualRMSE
 import random
 import numpy as np
 
 def pretraining(args, epochs=1, name="SugarNet"):
     exp = Exp_Main(args, name)
-    print(f"{FEATURES}")
     model, loss = exp.train(data=pretrain_map, epochs = epochs, features=FEATURES)
     if args.dim_extension:
       ext = "ext"
@@ -20,10 +19,10 @@ def pretraining(args, epochs=1, name="SugarNet"):
     else:
       delta = "nodelta"
     best_model_path = model_path + '/' + f'{name}_{args.data}.{ext}.{delta}.checkpoint.pth'
-    print(f"save {best_model_path}")
+    #print(f"save {best_model_path}")
     torch.save(model.state_dict(), best_model_path)
 
-def transfer_learn_model(all_train_df, all_test_df, args, name="SugarNet"):
+def transfer_learn_model(all_train_df, all_test_df, args, name="SugarNet", test_only = False):
   if args.dim_extension:
       ext = "ext"
   else:
@@ -32,30 +31,48 @@ def transfer_learn_model(all_train_df, all_test_df, args, name="SugarNet"):
       delta = "delta"
   else:
       delta = "nodelta"
-  best_model_path = model_path + '/' + f'{name}_{args.data}.{ext}.{delta}.checkpoint.pth'
+  
+  base_model_path = model_path + '/' + f'{name}_{args.data}.{ext}.{delta}.checkpoint.pth'
+
   rmape = []
   rrmse = []
 
   for id in all_train_df.keys():
     exp = Exp_Main(args, name)
 
-    exp.model.load_state_dict(torch.load(best_model_path))
-    df_train = all_train_df[id]
-    df_train['glucose_level'] = df_train['glucose_level'].interpolate('linear')
-
-    print(f"transfer learn patient {id}")
-    train = {}
-    train[id] = df_train
-    exp.train(data=train, epochs = args.learn_epochs, features=FEATURES, verbose=False)
-
+    transfer_model_path = transfer_path + '/' + f'{name}_{id}_transfer.checkpoint.pth'
     df_test = all_test_df[id]
-    mape, rmse = exp.test(data=df_test, features=FEATURES)
+
+    if test_only:
+      exp.model.load_state_dict(torch.load(transfer_model_path))
+    else:
+      exp.model.load_state_dict(torch.load(base_model_path))
+      df_train = all_train_df[id]
+      df_train['glucose_level'] = df_train['glucose_level'].interpolate('linear')
+      df_test = all_test_df[id]
+
+      print(f"transfer learn {id}")
+      train = {}
+      train[id] = df_train
+      model, _ = exp.train(data=train, epochs = args.learn_epochs, features=FEATURES, verbose=False)
+
+      #print(f"save {transfer_model_path}")
+      torch.save(model.state_dict(), transfer_model_path)
+
+    mape, rmse = exp.test(pid=id, data=df_test, features=FEATURES)
     rmape.append(mape)
     rrmse.append(rmse)
 
    # print(f"result for {id}: mape: {mape}, rmse {rmse}")
 
   return np.mean(np.array(rmape), axis=0), np.mean(np.array(rrmse), axis=0)
+
+# Example of generating figures
+def visualAnsSummary():
+  calcClark(['SugarNet'], [2069], "T2D", draw=True)
+  visual(['SugarNet'], [2078])
+  visualRMSE("T1D")
+
 
 if __name__ == '__main__':
     fix_seed = 2024
@@ -70,22 +87,20 @@ if __name__ == '__main__':
                         help='Number of epochs for pretraining')
     parser.add_argument('--learn_epochs', type=int, default=50,
                         help='Number of epochs for transfer learning')
-    parser.add_argument('--delta_forecast', type=bool, default=False, help='generate delta forecast')
+    parser.add_argument('--delta_forecast', type=bool, default=True, help='generate delta forecast')
     parser.add_argument('--dim_extension', type=bool, default=True, help='enable dimension extension')
 
     # data loader
-    parser.add_argument('--data', type=str, default='T2D', help='dataset type')
+    parser.add_argument('--data', type=str, default='T1D', help='dataset type')
     parser.add_argument('--features', type=str, default='MS',
                         help='forecasting task, options:[M, S, MS]; M:multivariate predict multivariate, S:univariate predict univariate, MS:multivariate predict univariate')
-   # parser.add_argument('--target', type=str, default='OT', help='target feature in S or MS task')
     parser.add_argument('--freq', type=str, default='t',
                         help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=12, help='input sequence length')
     parser.add_argument('--label_len', type=int, default=6, help='start token length')
     parser.add_argument('--pred_len', type=int, default=8, help='prediction sequence length')
-    parser.add_argument('--seasonal_patterns', type=str, default='Daily', help='subset for M4')
-    #parser.add_argument('--inverse', action='store_true', help='inverse output data', default=False)
+    parser.add_argument('--seasonal_patterns', type=str, default='Hourly', help='subset for M4')
 
     # model define
     parser.add_argument('--top_k', type=int, default=5, help='for TimesBlock')
@@ -118,7 +133,7 @@ if __name__ == '__main__':
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
-    parser.add_argument('--train_epochs', type=int, default=10, help='train epochs')
+    parser.add_argument('--train_epochs', type=int, default=30, help='train epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='optimizer learning rate')
@@ -140,6 +155,12 @@ if __name__ == '__main__':
       args.dec_in = len(FEATURES)
       args.c_out = len(FEATURES)
 
+    #'SugarNet', 'PatchTST', 'FreTS', 'DLinear', 'iTransformer', 'FGN', 'FiLM', 'TimeMixer', 'FEDformer'
+    models = ['SugarNet']
+
+    model_path = '/content/drive/MyDrive/research/diabetes/models'
+    transfer_path = '/content/drive/MyDrive/research/diabetes/transfer_models'
+
     total = 0
     for i in individual_learning:
       pre_training.remove(i)
@@ -150,16 +171,11 @@ if __name__ == '__main__':
     total += t
     
     print(f"total {total} points")
-    
-    model_path = '/content/drive/MyDrive/research/diabetes/FREQ_DOMAIN/models'
-
-    #'SugarNet', 'PatchTST', 'FreTS', 'DLinear', 'iTransformer', 'FGN', 'FiLM', 'TimeMixer'
-    models = ['SugarNet']
 
     for name in models:
       print(f"run {name} extension = {args.dim_extension} delta = {args.delta_forecast}")
       if name != 'SugarNet':
         args.learning_rate = 0.0001
-     # pretraining(args, epochs=args.pretraining_epochs, name=name)
-      mape, rmse = transfer_learn_model(train_map, test_map, args, name=name)
-      print(f"run {name} result mape {mape} \n rmse {rmse}")
+      pretraining(args, epochs=args.pretraining_epochs, name=name)
+      tmape, trmse = transfer_learn_model(train_map, test_map, args, name=name, test_only=False)
+      print(f"{name}\nmape {tmape[1]} {tmape[3]} {tmape[5]} {tmape[7]} {tmape[[1,3,5,7]].mean()}\nrmse {trmse[1]} {trmse[3]} {trmse[5]} {trmse[7]} {trmse[[1,3,5,7]].mean()}")

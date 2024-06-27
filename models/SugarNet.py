@@ -121,6 +121,7 @@ class Model(nn.Module):
 
         fft = torch.fft.rfft(x, dim=2, norm='ortho')
 
+        # fft.shape[2] = I//2+1
         exp = torch.zeros((fft.shape[0], fft.shape[1], fft.shape[2]*2, fft.shape[3]), device=inputD)
         
         ci = 0
@@ -129,23 +130,20 @@ class Model(nn.Module):
           exp[:, :, ci+1, :] = fft[:, :, y, :].imag
           ci = ci + 2
 
+        # if I is even, imaginary parts at Freq = 0  and Freq = I/2 is 0
+        # if I is odd, only Freq = 0 has 0 imaginary part
         exp = torch.cat((exp[:, :, :1, :], exp[:, :, 2:, :]), dim=2)
-        split = I//2+1
-        exp = torch.cat((exp[:, :, :split, :], exp[:, :, split+1:, :]), dim=2)
-        #print(f"exp shape {exp.shape}")
+
+        if I%2 == 0:
+          split = I//2+1
+          exp = torch.cat((exp[:, :, :split, :], exp[:, :, split+1:, :]), dim=2)
 
         exp = exp.reshape(B, C, -1)
-
-        #print(f"reshape {exp.shape}")
-
-        #y = self.fc(exp.permute(0, 2, 1))
+        # [B, C, I*D]
         y = self.ffc(exp)
         #batch, out_channel, L_out
-       # print(f"freq after conv {y.shape}")
         y, _ = self.lstm(y.permute(0, 2, 1))
-       # print(f"freq after lstm {y.shape}")
         y = self.leak(y.reshape(y.shape[0], -1))
-       # print(f"after leak {y.shape}")
         y = torch.squeeze(y, dim=1)
         split = y.shape[1]//2+1
         real = y[:, :split]
@@ -156,7 +154,6 @@ class Model(nn.Module):
         y = torch.stack((real, imag), dim=2)
         y = F.softshrink(y, lambd=self.sparsity_threshold)
         y = torch.view_as_complex(y)
-       # print(f"rfft {y.shape}")
         y = torch.fft.irfft(y, dim=1, norm="ortho")
         return y
 

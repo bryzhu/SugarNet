@@ -35,8 +35,6 @@ class Exp_Main(Exp_Basic):
             'FiLM': FiLM,
             'PatchTST': PatchTST,
             'FEDformer': FEDformer,
-            'back': back,
-            'sugar1': sugar1,
         }
         
         model = model_dict[self.name].Model(self.args).float()
@@ -121,36 +119,34 @@ class Exp_Main(Exp_Basic):
             best_loss = epoch_train_loss
             best_model = self.model
 
-        if epoch == epochs - 1:
+        if VERBOSE and epoch == epochs - 1:
               print("Epoch: {0}, Train Loss: {1:.7f}".format(
                     epoch + 1, epoch_train_loss))
         early_stopping(epoch_train_loss)
 
-        if early_stopping.early_stop:
+        if VERBOSE and early_stopping.early_stop:
               print("Early break at Epoch: {0}, Train Loss: {1:.7f}".format(
                     epoch + 1, epoch_train_loss))
               break
 
         adjust_learning_rate(model_optim, epoch + 1, self.name)
-      #  self.model.load_state_dict(torch.load(best_model_path))
 
       return best_model, best_loss
 
     def load_model(self, path):
       self.model.load_state_dict(torch.load(path))
 
-    def test(self, features, data):
+    def test(self, pid, features, data):
         X_test, Y_test = lag_target(data[features], delta=self.args.delta_forecast)
 
         test_data, test_loader = self._get_data(x = X_test, y = Y_test)
 
-     #  print(f"loader {len(test_loader)}")
         preds = []
         trues = []
         inputx = []
 
         self.model.eval()
-        folder_path = '/content/drive/MyDrive/research/FreTS/results'
+        folder_path = '/content/drive/MyDrive/research/diabetes/results'
 
         with torch.no_grad():
             for i, (batch_x, batch_y) in enumerate(test_loader):
@@ -167,13 +163,13 @@ class Exp_Main(Exp_Basic):
                 
                 outputs = self.model(batch_x, dec_inp)
 
+                # SugarNet outputs BG forecast only, but other baseline models may output multivariate forecast
                 if len(outputs.shape)>2:
                   outputs = outputs[:, :, 0]
 
                 pred = outputs.detach().cpu().numpy()  # .squeeze()
 
                 preds.append(pred)
-                #inputx.append(batch_x.detach().cpu().numpy())
 
         preds = np.array(preds)
         preds = np.concatenate(preds, axis=0)
@@ -210,8 +206,12 @@ class Exp_Main(Exp_Basic):
           
           for time in range(0, FUTURE_STEPS):
             pred_col = f"pred_cgm_{time}"
+            
             mae, mse, rmse, mape, mspe = metric(X_test[pred_col], X_test['glucose_level'])
-            print('horizon {} mape:{}, rmse:{}'.format(time, mape, rmse))
+            csv = f"{folder_path}/{pid}_{time}_{self.name}.csv"
+            X_test[[pred_col, 'glucose_level']].to_csv(csv)
+            if VERBOSE:
+              print('horizon {} mape:{}, rmse:{}'.format(time, mape, rmse))
             rmape.append(mape)
             rrmse.append(rmse)
         else:

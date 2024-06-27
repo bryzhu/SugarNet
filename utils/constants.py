@@ -22,7 +22,7 @@ LEARN_EPOCHS = 100
 #Run the pipeline how many times
 RUNS = 1
 #Verbose level of the trainer
-VERBOSE = 1
+VERBOSE = 0
 
 LEARNING_RATE=0.001
 MAX_CARBS=200

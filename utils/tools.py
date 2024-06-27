@@ -5,7 +5,9 @@ import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 import math
-from utils.constants import FREQ, FEATURES, FUTURE_STEPS
+from utils.constants import FREQ, FEATURES, FUTURE_STEPS, VERBOSE
+from utils.metrics import metric
+from matplotlib.dates import DateFormatter, HourLocator
 
 plt.switch_backend('agg')
 
@@ -497,8 +499,6 @@ def adjust_learning_rate(optimizer, epoch, name):
       'FiLM': 0.0001,
       'PatchTST': 0.0001,
       'FEDformer': 0.0001,
-      'back': 0.001,
-      'sugar1': 0.001,
     }
     lr_adjust = {epoch: learning_dict[name] * (0.5 ** ((epoch - 1) // 1))}
 
@@ -534,13 +534,203 @@ class dotdict(dict):
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
 
-def visual(true, preds=None, name='./pic/test.pdf'):
-    """
-    Results visualization
-    """
-    plt.figure()
-    plt.plot(true, label='GroundTruth', linewidth=2)
-    if preds is not None:
-        plt.plot(preds, label='Prediction', linewidth=2)
-    plt.legend()
-    plt.savefig(name, bbox_inches='tight')
+def calcClark(models, pids, datatype, draw = False):
+  path = "/content/drive/MyDrive/research/diabetes/results"
+
+  error = pd.DataFrame(columns=['patient', 'model', 'ph', 'A', 'B', 'C', 'D', 'E', 'clinical'])
+  
+  phs = range(FUTURE_STEPS)
+  if draw:
+    phs = [1, 3, 7]
+
+  for pid in pids:      
+      for i in range(len(phs)):
+        ph = phs[i]
+
+        col = f"pred_cgm_{ph}"
+        truedone = False
+      
+        for model in models:
+          plt.figure()
+          pic = f"{path}/pic/clark/{model}_{pid}_{ph}_clark.png"
+
+          ffile = f"{path}/{pid}_{ph}_{model}.csv"
+          
+          data = pd.read_csv(ffile)
+
+          plot, zone = clarke_error_grid(data['glucose_level'], data[col], "Patient "+str(pid), draw)
+
+          if draw:
+            plt.savefig(pic, bbox_inches='tight', dpi=1200)
+          total = np.sum(zone)
+          zone = zone/total
+          error.loc[len(error)] = [pid, model, ph, zone[0], zone[1], zone[2], zone[3], zone[4], zone[0] + zone[1]]
+    
+  stats = error[['model','A', 'B', 'C', 'D', 'E', 'clinical']].groupby('model').mean()
+  if draw==False:
+    csv = f"{path}/{datatype}_clark.csv"
+    scsv = f"{path}/{datatype}_clark_summary.csv"
+    print(stats)
+    error.to_csv(csv)
+    stats.to_csv(scsv)
+
+def clarke_error_grid(ref_values, pred_values, title_string, draw=False):
+    #Checking to see if the lengths of the reference and prediction arrays are the same
+    assert (len(ref_values) == len(pred_values)), "Unequal number of values (reference : {}) (prediction : {}).".format(len(ref_values), len(pred_values))
+
+    #Checks to see if the values are within the normal physiological range, otherwise it gives a warning
+    if VERBOSE:
+      if max(ref_values) > 400 or max(pred_values) > 400:
+        print (f"Input Warning: the maximum reference value {max(ref_values)} or the maximum prediction value {max(pred_values)} exceeds the normal physiological range of glucose (<400 mg/dl).")
+      if min(ref_values) < 0 or min(pred_values) < 0:
+        print (f"Input Warning: the minimum reference value {min(ref_values)} or the minimum prediction value {min(pred_values)} is less than 0 mg/dl.")
+
+    #Set up plot
+    plt.scatter(ref_values, pred_values, marker='o', color='black', s=8)
+   # plt.title(title_string + " Clarke Error Grid")
+    plt.xlabel("Actual (mg/dL)")
+    plt.ylabel("Forecast (mg/dL)")
+    plt.xticks([0, 50, 100, 150, 200, 250, 300, 350, 400])
+    plt.yticks([0, 50, 100, 150, 200, 250, 300, 350, 400])
+    plt.gca().set_facecolor('white')
+
+    #Set axes lengths
+    plt.gca().set_xlim([0, 400])
+    plt.gca().set_ylim([0, 400])
+    plt.gca().set_aspect((400)/(400))
+
+    #Plot zone lines
+    plt.plot([0,400], [0,400], ':', c='black')
+    plt.plot([0, 175/3], [70, 70], '-', c='black')
+    #plt.plot([175/3, 320], [70, 400], '-', c='black')
+    plt.plot([175/3, 400/1.2], [70, 400], '-', c='black')           #Replace 320 with 400/1.2 because 100*(400 - 400/1.2)/(400/1.2) =  20% error
+    plt.plot([70, 70], [84, 400],'-', c='black')
+    plt.plot([0, 70], [180, 180], '-', c='black')
+    plt.plot([70, 290],[180, 400],'-', c='black')
+    # plt.plot([70, 70], [0, 175/3], '-', c='black')
+    plt.plot([70, 70], [0, 56], '-', c='black')                     #Replace 175.3 with 56 because 100*abs(56-70)/70) = 20% error
+    # plt.plot([70, 400],[175/3, 320],'-', c='black')
+    plt.plot([70, 400], [56, 320],'-', c='black')
+    plt.plot([180, 180], [0, 70], '-', c='black')
+    plt.plot([180, 400], [70, 70], '-', c='black')
+    plt.plot([240, 240], [70, 180],'-', c='black')
+    plt.plot([240, 400], [180, 180], '-', c='black')
+    plt.plot([130, 180], [0, 70], '-', c='black')
+
+    #Add zone titles
+    plt.text(30, 15, "A", fontsize=15)
+    plt.text(370, 260, "B", fontsize=15)
+    plt.text(280, 370, "B", fontsize=15)
+    plt.text(160, 370, "C", fontsize=15)
+    plt.text(160, 15, "C", fontsize=15)
+    plt.text(30, 140, "D", fontsize=15)
+    plt.text(370, 120, "D", fontsize=15)
+    plt.text(30, 370, "E", fontsize=15)
+    plt.text(370, 15, "E", fontsize=15)
+
+    #Statistics from the data
+    zone = [0] * 5
+    for i in range(len(ref_values)):
+        if (ref_values[i] <= 70 and pred_values[i] <= 70) or (pred_values[i] <= 1.2*ref_values[i] and pred_values[i] >= 0.8*ref_values[i]):
+            zone[0] += 1    #Zone A
+
+        elif (ref_values[i] >= 180 and pred_values[i] <= 70) or (ref_values[i] <= 70 and pred_values[i] >= 180):
+            zone[4] += 1    #Zone E
+
+        elif ((ref_values[i] >= 70 and ref_values[i] <= 290) and pred_values[i] >= ref_values[i] + 110) or ((ref_values[i] >= 130 and ref_values[i] <= 180) and (pred_values[i] <= (7/5)*ref_values[i] - 182)):
+            zone[2] += 1    #Zone C
+        elif (ref_values[i] >= 240 and (pred_values[i] >= 70 and pred_values[i] <= 180)) or (ref_values[i] <= 175/3 and pred_values[i] <= 180 and pred_values[i] >= 70) or ((ref_values[i] >= 175/3 and ref_values[i] <= 70) and pred_values[i] >= (6/5)*ref_values[i]):
+            zone[3] += 1    #Zone D
+        else:
+            zone[1] += 1    #Zone B
+
+    return plt, zone
+
+def visualRMSE(data):
+    data=pd.read_csv(f"/content/drive/MyDrive/research/diabetes/results/{data}-summary.csv")
+    fig, ax = plt.subplots()
+    #mark = {'SugarNet':'o', 'PatchTST':'s', 'FreTS':'s', 'DLinear':'p', 'iTransformer':'^', 
+    #'FourierGNN':'D', 'FiLM':'D', 'TimeMixer':'h', 'FEDformer':'o'}
+    mark = {'SugarNet':'o', 'FreTS':'s', 'DLinear':'^', 'FEDformer':'p', 'FiLM':'D'}
+
+    #print(data)
+    data = data.astype(float)
+    #data['PH'] = data['PH']*15
+    
+    data['PH'] = (data['PH']-10)*15
+    data = data.rename(columns={'FGN': 'FourierGNN'})
+    for c in data.columns:
+      #data[c] = data[c]*10
+      print(f"{c} {data[data['PH'] >= 15][c].mean()}")
+      if c=='PH' or c not in mark:
+        continue
+      if c=='FGN':
+        c='FourierGNN'
+      #if c=='FourierGNN' or c=='FEDformer' or c=='FreTS':
+        #plt.plot(data[(data['PH'] <= 8) & (data['PH'] >= 1)]['PH'], data[(data['PH'] <= 8) & (data['PH'] >= 1)][c], label=c, linewidth=2, marker=mark[c], markerfacecolor='none')
+      #  plt.plot(data[(data['PH']%30==0) & (data['PH']>=30)]['PH'], data[(data['PH']%30==0) & (data['PH']>=30)][c], label=c, linewidth=2, marker=mark[c], markerfacecolor='none')
+      #else:
+        #plt.plot(data[(data['PH'] <= 8) & (data['PH'] >= 1)]['PH'], data[(data['PH'] <= 8) & (data['PH'] >= 1)][c], label=c, linewidth=2, marker=mark[c])
+      plt.plot(data[(data['PH']%30==0) & (data['PH']>=30)]['PH'], data[(data['PH']%30==0) & (data['PH']>=30)][c], label=c, linewidth=2, marker=mark[c], markersize=8)
+    
+    plt.legend(fontsize='small')
+    #print(data[data['PH']>=15]['PH'])
+    plt.title(f"Dataset T2D", fontsize=12, color='blue', fontweight='bold')
+    plt.xticks(data[(data['PH']%30==0) & (data['PH']>=30)]['PH'], [30, 60, 90, 120])
+    plt.yticks([10, 15, 20, 25, 30, 35],[10, 15, 20, 25, 30, 35])
+    plt.xlabel("PH (min)")
+    plt.ylabel("RMSE (mg/dL)")
+    plt.savefig(f"/content/drive/MyDrive/research/diabetes/results/pic/{data}_summary_rmse.png", bbox_inches='tight', dpi=1200)
+
+def visual(models, pids):
+    truedone = False
+    cat = {}
+    
+    path = "/content/drive/MyDrive/research/diabetes/results"
+    linestyles = {'SugarNet':'-', 'DLinear':'--', 'FEDformer':'-.'}
+    #linestyles = {'SugarNet':'-', 'FGN':'--', 'TimeMixer':'-.'}
+    #colors = {'SugarNet':'orange', 'FGN':'#AF50F3', 'TimeMixer':'#194193'}
+    colors = {'SugarNet':'orange', 'DLinear':'#DF50F3', 'FEDformer':'#8F4193'}
+    phs = [1, 3, 5, 7]
+    limit = 50
+    leftlimit = 30
+    lower = 80
+    
+    for pid in pids:
+      for ph in phs:
+        fig, ax = plt.subplots()
+        ax.xaxis.set_major_locator(HourLocator(interval=2))
+        time_formatter = DateFormatter('%H:%M')
+        ax.xaxis.set_major_formatter(time_formatter)
+        pic = f"{path}/pic/{pid}_{ph}.png"
+        col = f"pred_cgm_{ph}"
+        truedone = False
+        bestSugar = np.inf
+        bestLower = -1
+      
+        for model in models:
+          file = f"{path}/{pid}_{ph}_{model}.csv"
+          
+          data = pd.read_csv(file)
+
+          data['Date'] = pd.to_datetime(data['Date'])
+
+          mapev = np.abs((data[col] - data['glucose_level']) / data['glucose_level'])
+
+          for lower in range(40, len(data)-limit-1):
+            mape = mapev[lower:lower+limit].mean()
+            if model=='SugarNet':
+              if mape<bestSugar:
+                bestSugar = mape
+                bestLower = lower
+          
+          if truedone == False:
+            plt.plot(data['Date'][bestLower-leftlimit:bestLower+limit], data['glucose_level'][bestLower-leftlimit:bestLower+limit], label="Ground Truth", linewidth=2, linestyle=":")
+            truedone = True
+          
+          plt.title(f"Patient ID={pid}, PH={(ph+1)*15}min", fontsize=12, color='blue', fontweight='bold')
+          plt.plot(data['Date'][bestLower:bestLower+limit], data[col][bestLower:bestLower+limit], label=model, linewidth=2, linestyle=linestyles[model], color=colors[model])
+        
+        plt.xticks(rotation=45)
+        plt.legend()
+        plt.savefig(pic, bbox_inches='tight', dpi=1200)
