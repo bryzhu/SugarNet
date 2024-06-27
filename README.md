@@ -9,11 +9,13 @@ Diabetic Patients with Joint Time-Frequency Learning </b></h2>
 personalized BG forecasts based on food, medication, insulin, and BG history. The
 model employs a join time-frequency domain learner with a convlutional LSTM.
 
+
 🌟**High level architecture** 
 
 <p align="center">
 <img src="./pic/overall.png"  alt="" align=center />
 </p>
+
 
 🌟**Baselines**
 
@@ -36,6 +38,7 @@ The following models are compared with SugarNet.
 7. [**FiLM**]: FiLM: Frequency improved Legendre Memory Model for Long-term Time Series Forecasting[\[NeurIPS 2022\]\(https://openreview.net/forum?id=zTQdHSQUQWc)[\[GitHub Repo\]](https://github.com/thuml/Time-Series-Library/blob/main/models/FiLM.py)
    
 8. [**FourierGNN**]: FourierGNN: Rethinking Multivariate Time Series Forecasting from a Pure Graph Perspective[\[NeurIPS 2023\]\(https://arxiv.org/pdf/2311.06190.pdf)[\[GitHub Repo\]](https://github.com/aikunyi/FourierGNN)
+
 
 🌟**Acknowledgement**
 
