@@ -73,7 +73,6 @@ def visualAnsSummary():
   visual(['SugarNet'], [2078])
   visualRMSE("T1D")
 
-
 if __name__ == '__main__':
     fix_seed = 2024
     random.seed(fix_seed)
