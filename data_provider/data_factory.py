@@ -1,8 +1,8 @@
 from data_provider.data_loader import Dataset_Delta, Dataset_Regular
-from utils.constants import FUTURE_STEPS, HISTORY_STEPS, BATCH
+from utils.constants import BATCH
 from torch.utils.data import DataLoader
 
-def data_provider(x, y, delta=True):
+def data_provider(x, y, history, future, delta=True):
   if delta==True:
     Data = Dataset_Delta
   else:
@@ -13,7 +13,7 @@ def data_provider(x, y, delta=True):
   data_set = Data(
         x,
         y,
-        size=[HISTORY_STEPS, FUTURE_STEPS]
+        size=[history, future]
     )
 
   data_loader = DataLoader(

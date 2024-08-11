@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from utils.constants import HISTORY_STEPS, FUTURE_STEPS
 
 alpha = 0.6
 
@@ -10,15 +9,22 @@ class Model(nn.Module):
     def __init__(self, args):
         super(Model, self).__init__()
         self.args = args
-        self.pre_length = FUTURE_STEPS
-        self.seq_length = HISTORY_STEPS
+        self.pre_length = self.args.pred_len
+        self.seq_length = self.args.seq_len
         self.sparsity_threshold = 0.01
         self.scale = 0.02
         self.n_features = args.enc_in
         self.embed_size = 128
         self.embeddings = nn.Parameter(torch.randn(1, self.embed_size))
         # Convolution layer for dimension extended input
-        self.ffc = nn.Sequential(
+        self.ffct = nn.Sequential(
+            nn.Conv1d(in_channels=self.n_features, out_channels=8, kernel_size=24, padding='same'),
+            nn.MaxPool1d(kernel_size=4, stride=4),
+            nn.Conv1d(in_channels=8, out_channels=16, kernel_size=12, padding='same'),
+            nn.MaxPool1d(kernel_size=4, stride=4),
+            nn.Conv1d(in_channels=16, out_channels=32, kernel_size=6, padding='same'),
+            nn.MaxPool1d(kernel_size=3, stride=3))
+        self.ffcf = nn.Sequential(
             nn.Conv1d(in_channels=self.n_features, out_channels=8, kernel_size=24, padding='same'),
             nn.MaxPool1d(kernel_size=4, stride=4),
             nn.Conv1d(in_channels=8, out_channels=16, kernel_size=12, padding='same'),
@@ -26,27 +32,77 @@ class Model(nn.Module):
             nn.Conv1d(in_channels=16, out_channels=32, kernel_size=6, padding='same'),
             nn.MaxPool1d(kernel_size=3, stride=3))
         # Convolution layer for raw input without dimension extension
-        self.fc = nn.Sequential(
+        self.fct = nn.Sequential(
             nn.Conv1d(in_channels=self.n_features, out_channels=8, kernel_size=12, padding='same'),
             nn.MaxPool1d(kernel_size=2),
             nn.Conv1d(in_channels=8, out_channels=16, kernel_size=6, padding='same'),
             nn.MaxPool1d(kernel_size=2),
             nn.Conv1d(in_channels=16, out_channels=32, kernel_size=3, padding='same'),
             nn.MaxPool1d(kernel_size=2))
-        self.lstm = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, batch_first=True)
-        self.leak = nn.Sequential(
-            nn.Linear(32*64, 128),
-            nn.LeakyReLU(),
-            nn.Linear(128, FUTURE_STEPS)
+        self.fcf = nn.Sequential(
+            nn.Conv1d(in_channels=self.n_features, out_channels=8, kernel_size=12, padding='same'),
+            nn.MaxPool1d(kernel_size=2),
+            nn.Conv1d(in_channels=8, out_channels=16, kernel_size=6, padding='same'),
+            nn.MaxPool1d(kernel_size=2),
+            nn.Conv1d(in_channels=16, out_channels=32, kernel_size=3, padding='same'),
+            nn.MaxPool1d(kernel_size=2))
+        self.lstmt = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, batch_first=True)
+        self.lstmf = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, batch_first=True)
+        self.time_only = nn.Sequential(
+            nn.Linear(32*64, 64),
         )
         self.fuse = nn.Sequential(
-           nn.Linear(2*FUTURE_STEPS, FUTURE_STEPS)
+           nn.Linear(2*self.pre_length, self.pre_length)
         )
         self.fuse_no_extension = nn.Sequential(
            nn.Linear(128, 64),
            nn.Linear(64, 32),
-           nn.Linear(32, FUTURE_STEPS)
+           nn.Linear(32, self.pre_length)
         )
+        self.time_or_frequency_only = nn.Sequential(
+           nn.Linear(64, 128),
+           nn.Linear(128, 32),
+           nn.Linear(32, self.pre_length)
+        )
+        self.leakt = nn.Sequential(
+            nn.Linear(32*64, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, self.args.pred_len)
+        )
+        self.leakf = nn.Sequential(
+            nn.Linear(32*64, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, self.args.pred_len)
+        )
+        self.leakDiaTrendf = nn.Sequential(
+            nn.Linear(6144, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, self.args.pred_len)
+        )
+        self.leakDiaTrendt = nn.Sequential(
+            nn.Linear(6144, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, self.args.pred_len)
+        )
+        self.leak10f = nn.Sequential(
+            nn.Linear(3072, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, self.args.pred_len)
+        )
+        self.leak10t = nn.Sequential(
+            nn.Linear(3072, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, self.args.pred_len)
+        )
+
+    #def leakModule(self, inputsize):
+      #if self.leak is None:
+    #  self.leak = nn.Sequential(
+    #        nn.Linear(inputsize, 128),
+    #        nn.LeakyReLU(),
+    #        nn.Linear(128, self.pre_length)
+    #  )
+    #  return self.leak
 
     # dimension extension
     def tokenEmb(self, x):
@@ -58,24 +114,39 @@ class Model(nn.Module):
         return x * y
 
     def forward(self, x, x_dec):
-      if self.args.dim_extension:
-        tf = self.forward_time_domain(x)
-        tf = torch.squeeze(tf, dim=1)
-        ff = self.forward_freq_domain(x)
-        return self.fuse(torch.cat((tf, ff), dim=1))
+      timefunc = self.forward_time_domain
+      freqfunc = self.forward_freq_domain
+      fusefunc = self.fuse
+      if self.args.dim_extension==False:
+        timefunc = self.forward_time_domain_no_extension
+        freqfunc = self.forward_freq_domain_no_extension
+        fusefunc = self.fuse_no_extension
       
-      tf = self.forward_time_domain_no_extension(x)
-      tf = torch.squeeze(tf, dim=1)
-      ff = self.forward_freq_domain_no_extension(x)
-
-      return self.fuse_no_extension(torch.cat((tf, ff), dim=1))
+      tf = None
+      ff = None
+      #time only OR both
+      if self.args.mode==2 or self.args.mode==1:
+          tf = timefunc(x)
+          tf = torch.squeeze(tf, dim=1)
+      if self.args.mode==3 or self.args.mode==1:
+          ff = freqfunc(x)
+      
+      if tf!=None and ff!=None:
+        #print(f"tf {tf.shape}")
+        #print(f"ff {ff.shape}")
+        return fusefunc(torch.cat((tf, ff), dim=1))
+      if tf!=None:
+        return self.time_or_frequency_only(tf)
+      if self.args.dim_extension:
+        return ff
+      return self.time_or_frequency_only(ff)
 
     def forward_time_domain_no_extension(self, x):
         # x: [Batch, Input length, Channel]
         B, I, C = x.shape
 
-        y = self.fc(x.permute(0, 2, 1))
-        y, _ = self.lstm(y.permute(0, 2, 1))
+        y = self.fcf(x.permute(0, 2, 1))
+        y, _ = self.lstmf(y.permute(0, 2, 1))
 
         return y
 
@@ -94,8 +165,8 @@ class Model(nn.Module):
             exp[:, ci+1, :] = fft[:, x, :].imag
             ci = ci + 2
 
-        y = self.fc(exp.permute(0, 2, 1))
-        y, _ = self.lstm(y.permute(0, 2, 1))
+        y = self.fcf(exp.permute(0, 2, 1))
+        y, _ = self.lstmf(y.permute(0, 2, 1))
         #print(f"y {y.shape}")
         y = torch.squeeze(y, dim=1)
         split = y.shape[1]//2+1
@@ -140,10 +211,19 @@ class Model(nn.Module):
 
         exp = exp.reshape(B, C, -1)
         # [B, C, I*D]
-        y = self.ffc(exp)
+        y = self.ffcf(exp)
         #batch, out_channel, L_out
-        y, _ = self.lstm(y.permute(0, 2, 1))
-        y = self.leak(y.reshape(y.shape[0], -1))
+        #print(f"freq after conv {y.shape}")
+        y, _ = self.lstmf(y.permute(0, 2, 1))
+        #print(f"FREQ before leak {y.reshape(y.shape[0], -1).shape}")
+
+        if self.args.sampling_rate==5:
+          y = self.leakDiaTrendf(y.reshape(y.shape[0], -1))
+        elif self.args.sampling_rate==15:
+          y = self.leakf(y.reshape(y.shape[0], -1))
+        else:
+          y = self.leak10f(y.reshape(y.shape[0], -1))
+       
         y = torch.squeeze(y, dim=1)
         split = y.shape[1]//2+1
         real = y[:, :split]
@@ -162,18 +242,32 @@ class Model(nn.Module):
         B, I, C = x.shape
 
         x = self.tokenEmb(x)
-        #print(f"x {x.shape}")
-
         x = x.reshape(B, C, -1)
 
         #print(f"after reshape {x.shape}")
 
        # y = self.fc(x.permute(0, 2, 1))
-        y = self.ffc(x)
-        #print(f"after conv {y.shape}")
-        y, _ = self.lstm(y.permute(2, 0, 1))
-        #print(f"time lstm {y.shape}")
-       # y, _ = self.lstm(y.permute(0, 2, 1))
-        y = self.leak(y.reshape(y.shape[0], -1))
+        y = self.ffct(x)
+        #output shape of conv layer [batch, channel, dynamic]
+        #dynamic depends on input seq length and conv filters
+        
+        #input shape of lstm [sequence_length, batch_size, channel]
+        y, _ = self.lstmt(y.permute(2, 0, 1))
+        #output shape of lstm [sequence_length, batch_size, hidden_size]
+   
+        # time only
+        if self.args.mode==2:
+          y = self.time_only(y.reshape(y.shape[0], -1))
+        else:
+          y = y.permute(1, 0, 2)
+          #print(f"TIME before leak {y.shape}")
+          #print(f"permute {y.permute(1, 0, 2).shape}")
+          #print(f"permute {y.reshape(y.shape[0], -1).shape}")
+          if self.args.sampling_rate==5:
+            y = self.leakDiaTrendt(y.reshape(y.shape[0], -1))
+          elif self.args.sampling_rate==15:
+            y = self.leakt(y.reshape(y.shape[0], -1))
+          else:
+            y = self.leak10t(y.reshape(y.shape[0], -1))
 
         return y

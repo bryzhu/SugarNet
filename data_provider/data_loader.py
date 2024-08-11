@@ -70,6 +70,7 @@ class Dataset_Delta(Dataset):
         data = self.df_data.values
 
         self.data_x = self.df_data.values
+        #print(self.df_data.columns)
         self.data_y = self.target.values
 
         if self.scale:

@@ -5,7 +5,7 @@ import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 import math
-from utils.constants import FREQ, FEATURES, FUTURE_STEPS, VERBOSE
+from utils.constants import FREQ, VERBOSE
 from utils.metrics import metric
 from matplotlib.dates import DateFormatter, HourLocator
 
@@ -429,14 +429,14 @@ def loadPreTrainingData(ids, data_path, features):
     split = int(len(data)*PRETRAIN_SPLIT)
     train = data[:split].copy(deep=True)
     test = data[split:].copy(deep=True)
-    train_map[id] = train
-    test_map[id] = test
+    train_map[id] = [train]
+    test_map[id] = [test]
 
  # print(f"total {sum} pretraining")
   return (train_map, test_map, sum)
   #print(data.loc[data['carbs']>0, :])
 
-def lag_target(df, lag=FUTURE_STEPS, target_col='glucose_level', delta=True):
+def lag_target(df, lag, target_col='glucose_level', delta=True):
     # Get delta
     if delta==True:
       target_df = pd.concat([-df[target_col].diff(periods=-i) for i in range(1, lag + 1)], axis=1).dropna(axis=0)
@@ -464,24 +464,24 @@ def loadIndividualLearningData(ids, data_path, datatype, features):
       if id == 2069: # subject 2069 has 3 periods
         if dataId=='0' or dataId=='1':
           if id in train_map:
-            train_map[id] = pd.concat([train_map[id], data])
+            train_map[id][0] = pd.concat([train_map[id][0], data])
           else:
-            train_map[id] = data
+            train_map[id] = [data]
         else:
-          test_map[id] = data
+          test_map[id] = [data]
       else:
         if dataId=='0':
-          train_map[id] = data
+          train_map[id] = [data]
         else:
-          test_map[id] = data
+          test_map[id] = [data]
     else: #T1D
       if dataId=='0' or dataId=='1':
         if id in train_map:
-          train_map[id] = pd.concat([train_map[id], data])
+          train_map[id][0]= pd.concat([train_map[id][0], data])
         else:
-          train_map[id] = data
+          train_map[id] = [data]
       else:
-        test_map[id] = data
+        test_map[id] = [data]
 
   #print(f"total {sum} learning")
   return (train_map, test_map, sum)
@@ -734,3 +734,39 @@ def visual(models, pids):
         plt.xticks(rotation=45)
         plt.legend()
         plt.savefig(pic, bbox_inches='tight', dpi=1200)
+
+def readVirtual(path, history, future, freq=5, features=None, includeBasal=True):
+ 
+  os.chdir(path)
+  types = ['adolescent', 'child', 'adult']
+  patients = (['adolescent#0{}'.format(str(i).zfill(2)) for i in range(1, 11)] +
+               ['child#0{}'.format(str(i).zfill(2)) for i in range(1, 11)] +
+               ['adult#0{}'.format(str(i).zfill(2)) for i in range(1, 11)])
+  
+  pretrain_map = {}
+  train_map = {}
+  test_map = {}
+
+  for t in types:
+    pretrain_map[t] = {}
+    train_map[t] = {}
+    test_map[t] = {}
+
+    for i in range(1, 11): 
+      fi = 'bb_{}#0{}_seed862198_01.csv'.format(t, str(i).zfill(2))
+      df = pd.read_csv(fi)
+      #BG and CGM
+      df.rename(columns={"CGM":"glucose_level", "CHO":"carbs", "insulin":"bolus"}, inplace=True)
+      df['Time'] = pd.to_datetime(df['Time'])
+      df = df[df['Time'] > '2018-01-01'][features] #need one day warm-up
+      df.apply(pd.to_numeric, errors='coerce')
+
+      split = int(len(df)*0.75)
+
+      if i<9:
+        pretrain_map[t][i] = [df]
+      else:
+        train_map[t][i] = [df[:split]]
+        test_map[t][i] = [df[split:]]
+  
+  return (pretrain_map, train_map, test_map)

@@ -3,15 +3,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Model(nn.Module):
-    def __init__(self, args, pre_length=8, embed_size=128,
-                 feature_size=5, seq_length=12, hidden_size=256, hard_thresholding_fraction=1, hidden_size_factor=1, sparsity_threshold=0.01):
+    def __init__(self, args, embed_size=128,
+                 feature_size=5, hidden_size=256, hard_thresholding_fraction=1, hidden_size_factor=1, sparsity_threshold=0.01):
         super().__init__()
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.number_frequency = 1
-        self.pre_length = pre_length
-        self.feature_size = feature_size
-        self.seq_length = seq_length
+        self.pre_length = args.pred_len
+        self.feature_size = args.feature_size
+        self.seq_length = args.seq_len
         self.frequency_size = self.embed_size // self.number_frequency
         self.hidden_size_factor = hidden_size_factor
         self.sparsity_threshold = sparsity_threshold

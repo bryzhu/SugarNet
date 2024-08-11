@@ -3,15 +3,17 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from torch import optim
-from utils.constants import VERBOSE, LEARNING_RATE, BATCH, FUTURE_STEPS, FREQ
+from torch.utils.data.dataset import Dataset
+from utils.constants import VERBOSE, LEARNING_RATE, BATCH, FREQ
 from data_provider.data_factory import data_provider
 from utils.tools import EarlyStopping, lag_target, adjust_learning_rate
-from models import DLinear, iTransformer, FreTS, SugarNet, FGN, TimeMixer, FiLM, PatchTST, FEDformer, back, sugar1
+from models import DLinear, iTransformer, FreTS, SugarNet, FGN, TimeMixer, FiLM, PatchTST, FEDformer
 from exp.exp_basic import Exp_Basic
 from utils.metrics import metric
+from datetime import timedelta
+
 import os
 import time
-
 import warnings
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,7 +43,7 @@ class Exp_Main(Exp_Basic):
         return model
 
     def _get_data(self, x, y):
-        data_set, data_loader = data_provider(x, y, delta=self.args.delta_forecast)
+        data_set, data_loader = data_provider(x, y, self.args.seq_len, self.args.pred_len, delta=self.args.delta_forecast)
         #data_set, data_loader = data_provider(data, args)
         return data_set, data_loader
 
@@ -57,42 +59,53 @@ class Exp_Main(Exp_Basic):
         criterion = nn.MSELoss()
         return criterion
 
-    def save_checkpoint(self, val_loss, model, path):
-       # print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), path)
-
-    def train(self, data, epochs, features, verbose=VERBOSE):
+    def train(self, data, epochs, features, verbose=VERBOSE, mode='pretrain', id=-1):
+      model_path = '/content/drive/MyDrive/research/diabetes/models'
       patience = 3
       early_stopping = EarlyStopping(patience=patience, verbose=True)
       model_optim = self._select_optimizer()
       criterion = self._select_criterion()
       best_loss = torch.inf
       best_model = None
+      if self.args.dim_extension:
+        ext = "ext"
+      else:
+        ext = "noexit"
+      if self.args.delta_forecast:
+        delta = "delta"
+      else:
+        delta = "nodelta"
 
       for epoch in range(epochs):
-        #print(f"TRAIN epoch {epoch}")
-        train_loss = []
+        epoch_train_loss = []
         for id in data.keys():
-          df_train = data[id]
-          df_train['glucose_level'] = df_train['glucose_level'].interpolate('linear')
-          df_train.dropna(inplace=True)
+          patient_train_loss = []
+          for df_train in data[id]:
+            df_train['glucose_level'] = df_train['glucose_level'].interpolate('linear')
+            df_train.dropna(inplace=True)
           
-          X_train, Y_train = lag_target(df_train[features], delta=self.args.delta_forecast)
+            X_train, Y_train = lag_target(df_train[features], self.args.pred_len, delta=self.args.delta_forecast)
           
-          train_data, train_loader = self._get_data(X_train, Y_train)
+            train_data, train_loader = self._get_data(X_train, Y_train)
 
-          self.model.train()
+            self.model.train()
 
-          epoch_time = time.time()
-          for i, (batch_x, batch_y) in enumerate(train_loader):
+            epoch_time = time.time()
+            for i, (batch_x, batch_y) in enumerate(train_loader):
               model_optim.zero_grad()
               batch_x = batch_x.float().to(self.device)
               batch_y = batch_y.float().to(self.device)
 
+              #print(f"batch x {batch_x.shape}")
+              #print(f"batch y {batch_y.shape}")
               #[B, C, pred_len] -> [B, pred_len, C]
               if batch_y.shape[2] == self.args.pred_len:
                 batch_y = batch_y.permute(0, 2, 1)
               dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+              #print(f"x {batch_x.shape}")
+              #print(f"y {batch_y.shape}")
+              #print(f"dec inp {dec_inp.shape}")
+              #print(self.args.label_len)
               dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
               outputs = self.model(batch_x, dec_inp)
               
@@ -102,31 +115,38 @@ class Exp_Main(Exp_Basic):
               batch_y = batch_y[:, :, 0]
 
               loss = criterion(outputs, batch_y)
-              loss_auxi = torch.fft.fft(outputs, dim=1) - torch.fft.fft(batch_y, dim=1)
-              loss_auxi = loss_auxi.mean().abs()
-
-              loss = alpha*loss + (1-alpha)*loss_auxi
-
-              train_loss.append(loss.item())
+              patient_train_loss.append(loss.item())
 
               loss.backward()
               model_optim.step()
+            
+          patient_loss = np.average(patient_train_loss)
+          epoch_train_loss.append(patient_loss)
+          #if VERBOSE:
+          #  print(f"epoch {epoch} patient {id} loss {patient_loss}")
 
-        epoch_train_loss = np.average(train_loss)
-        if VERBOSE:
-          print(f"epoch {epoch} loss {epoch_train_loss}")
-        if (epoch_train_loss<best_loss):
-            best_loss = epoch_train_loss
+        train_loss = np.average(epoch_train_loss)
+        #if VERBOSE:
+        #print(f"epoch {epoch} overall loss {train_loss}")
+        if (train_loss<best_loss):
+            best_loss = train_loss
             best_model = self.model
+            if mode=='transfer':
+              best_model_path = model_path + '/' + f'{self.name}_{self.args.data}.{ext}.{delta}.{mode}.{id}.checkpoint.pth'
+            else:
+              best_model_path = model_path + '/' + f'{self.name}_{self.args.data}.{ext}.{delta}.{mode}.checkpoint.pth'
+            if VERBOSE:
+              print(f"save {best_model_path} at epoch {epoch}")
+            torch.save(self.model.state_dict(), best_model_path)
 
-        if VERBOSE and epoch == epochs - 1:
-              print("Epoch: {0}, Train Loss: {1:.7f}".format(
-                    epoch + 1, epoch_train_loss))
-        early_stopping(epoch_train_loss)
+        if epoch == epochs - 1:
+              print("Epoch: {0}, final Train Loss: {1:.7f}".format(
+                    epoch + 1, train_loss))
+        early_stopping(train_loss)
 
-        if VERBOSE and early_stopping.early_stop:
-              print("Early break at Epoch: {0}, Train Loss: {1:.7f}".format(
-                    epoch + 1, epoch_train_loss))
+        if early_stopping.early_stop:
+              #print("Early break at Epoch: {0}, Train Loss: {1:.7f}".format(
+              #      epoch + 1, train_loss))
               break
 
         adjust_learning_rate(model_optim, epoch + 1, self.name)
@@ -137,9 +157,12 @@ class Exp_Main(Exp_Basic):
       self.model.load_state_dict(torch.load(path))
 
     def test(self, pid, features, data):
-        X_test, Y_test = lag_target(data[features], delta=self.args.delta_forecast)
+      for sdata in data:
+        X_test, Y_test = lag_target(sdata[features], self.args.pred_len, delta=self.args.delta_forecast)
 
         test_data, test_loader = self._get_data(x = X_test, y = Y_test)
+
+        #features_used = features.remove("Date")
 
         preds = []
         trues = []
@@ -152,9 +175,13 @@ class Exp_Main(Exp_Basic):
             for i, (batch_x, batch_y) in enumerate(test_loader):
 
                 #print(f"testing {test_data[i]}")
+                #batch_x = batch_x[features_used].float().to(self.device)
                 batch_x = batch_x.float().to(self.device)
-                
                 batch_y = batch_y.float().to(self.device)
+
+                #print(f"x {batch_x.shape}")
+                #print(f"y {batch_y.shape}")
+                #print(f"label {label.shape}")
 
                 if batch_y.shape[2] == self.args.pred_len:
                   batch_y = batch_y.permute(0, 2, 1)
@@ -166,7 +193,8 @@ class Exp_Main(Exp_Basic):
                 # SugarNet outputs BG forecast only, but other baseline models may output multivariate forecast
                 if len(outputs.shape)>2:
                   outputs = outputs[:, :, 0]
-
+                
+                #print(f"pred for {label.min()} to {label.max()}")
                 pred = outputs.detach().cpu().numpy()  # .squeeze()
 
                 preds.append(pred)
@@ -174,16 +202,10 @@ class Exp_Main(Exp_Basic):
         preds = np.array(preds)
         preds = np.concatenate(preds, axis=0)
 
-        times = {
-          FREQ: 0,
-          2*FREQ: 1,
-          3*FREQ: 2,
-          4*FREQ: 3,
-          5*FREQ: 4,
-          6*FREQ: 5,
-          7*FREQ: 6,
-          8*FREQ: 7,
-        }
+        times = {}
+
+        for i in range(self.args.pred_len):
+          times[(i+1)*self.args.sampling_rate] = i
 
         rmape = []
         rrmse = []
@@ -204,7 +226,7 @@ class Exp_Main(Exp_Basic):
           
           X_test = X_test.dropna()
           
-          for time in range(0, FUTURE_STEPS):
+          for time in range(0, self.args.pred_len):
             pred_col = f"pred_cgm_{time}"
             
             mae, mse, rmse, mape, mspe = metric(X_test[pred_col], X_test['glucose_level'])

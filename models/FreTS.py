@@ -16,7 +16,6 @@ class Model(nn.Module):
         self.hidden_size = 256  # hidden_size
         self.pred_len = configs.pred_len
         self.feature_size = configs.enc_in  # channels
-        print(f"pred len {self.pred_len}")
         self.seq_len = configs.seq_len
         self.channel_independence = configs.channel_independence
         self.sparsity_threshold = 0.01
@@ -105,4 +104,5 @@ class Model(nn.Module):
         x = self.MLP_temporal(x, B, N, T)
         x = x + bias
         x = self.fc(x.reshape(B, N, -1)).permute(0, 2, 1)
+        #print(f"forward x_enc {x_enc.shape}")
         return x
