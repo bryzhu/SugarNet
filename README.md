@@ -11,6 +11,8 @@ model has two versions. Version I employs a join time-frequency domain learner w
 
 
 🌟**High level architecture** 
+
+
 ***Version I***
 <p align="center">
 <img src="./pic/overall.png"  alt="" align=center />
@@ -18,7 +20,7 @@ model has two versions. Version I employs a join time-frequency domain learner w
 
 ***Version II***
 <p align="center">
-<img src="./pic/overall.png"  alt="" align=center />
+<img src="./pic/Zhu1.png"  alt="" align=center />
 </p>
 
 🌟**Baselines**
